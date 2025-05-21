@@ -10,12 +10,11 @@ export class RoutingController {
     public currentNodeId: NodeId | null = null;
     public pathTaken: NodeId[] = [];
     public isPaused: boolean = true;
-    private _isPlaying: boolean = false; // To control continuous play vs single step
+    private _isPlaying: boolean = false;
 
     private activeDataPacket: DataPacket | null = null;
     private animationFrameId: number | null = null;
 
-    // UI Update Callbacks
     private updateStatusCallback: (status: string) => void;
     private updatePathTakenCallback: (path: string) => void;
     private updateTryingNeighborCallback: (neighbor: string, tier: string) => void;
@@ -53,7 +52,7 @@ export class RoutingController {
         this.endNodeId = endId;
         this.currentNodeId = startId;
         this.pathTaken = [startId];
-        this.isPaused = true; // Start paused
+        this.isPaused = true;
         this._isPlaying = false;
 
         this.activeDataPacket = {
@@ -99,12 +98,11 @@ export class RoutingController {
                 cancelAnimationFrame(this.animationFrameId);
                 this.animationFrameId = null;
             }
-             // Ensure packet stops moving visually if paused mid-transit
             if (this.activeDataPacket) this.activeDataPacket.isMoving = false;
             this.visualizer.render(
               this.pathTaken,
-              this.currentNodeId ?? undefined, // Convert null to undefined
-              this.endNodeId ?? undefined,     // Convert null to undefined
+              this.currentNodeId ?? undefined,
+              this.endNodeId ?? undefined,
               this.activeDataPacket
             );
         }
@@ -122,8 +120,8 @@ export class RoutingController {
             if (this.activeDataPacket) this.activeDataPacket.isMoving = false;
             this.visualizer.render(
               this.pathTaken,
-              this.currentNodeId ?? undefined, // Convert null to undefined
-              this.endNodeId ?? undefined,     // Convert null to undefined
+              this.currentNodeId ?? undefined,
+              this.endNodeId ?? undefined,
               this.activeDataPacket
             );
             return;
@@ -138,17 +136,12 @@ export class RoutingController {
         let nextHop: NodeId | null = null;
         let chosenTier = -1;
 
-        // 1. Check direct connection to endNodeId (effectively H0 for routingController)
         if (currentNode.neighbors.has(this.endNodeId)) {
             nextHop = this.endNodeId;
-            chosenTier = 0; // Signifies direct connection
+            chosenTier = 0;
             this.updateTryingNeighborCallback(this.endNodeId, "Direct (H0)");
         } else {
-            // 2. Check neighbors' Bloom Filters (cached by current node)
-            // We want the neighbor N such that D is in N's BF_Hk for the smallest k
             let bestK = Infinity;
-
-            // Sort neighbors for deterministic behavior if multiple provide same best k
             const sortedNeighbors = Array.from(currentNode.neighbors).sort();
 
             for (const neighborId of sortedNeighbors) {
@@ -156,21 +149,16 @@ export class RoutingController {
                 if (!neighborCachedFilters) continue;
 
                 for (let k_tier = 1; k_tier <= this.network.maxHopsForBF; k_tier++) {
-                    if (k_tier < bestK) { // Only proceed if this tier could be better
+                    if (k_tier < bestK) {
                         const neighborsBfForTierK = neighborCachedFilters[k_tier];
                         if (neighborsBfForTierK && neighborsBfForTierK.has(this.endNodeId)) {
                             bestK = k_tier;
-                            nextHop = neighborId; // Tentatively choose this neighbor
+                            nextHop = neighborId;
                             chosenTier = k_tier;
                             this.updateTryingNeighborCallback(neighborId, `H${k_tier}`);
-                            // No break here, another neighbor might offer same bestK, sorted order handles tie.
-                            // Or, if we want first found for a given K: break;
                         }
-                    } else {
-                         // If current k_tier is not better than bestK found so far for *any* neighbor,
-                         // no need to check higher tiers for *this* neighbor.
+                    } else
                         break;
-                    }
                 }
             }
         }
@@ -179,7 +167,7 @@ export class RoutingController {
             const nextNodeObj = this.network.getNode(nextHop);
             if (nextNodeObj && this.activeDataPacket) {
                 this.activeDataPacket.targetPosition = { ...nextNodeObj.position };
-                this.activeDataPacket.currentPosition = { ...currentNode.position }; // Reset start for animation
+                this.activeDataPacket.currentPosition = { ...currentNode.position };
                 this.activeDataPacket.progress = 0;
                 this.activeDataPacket.isMoving = true;
 
@@ -187,14 +175,11 @@ export class RoutingController {
                 this.updatePathTakenCallback(this.pathTaken.join(' -> '));
                 this.updateStatusCallback(`Moving data from ${this.currentNodeId} to ${nextHop}...`);
 
-
-                // Store next logical hop, animation will handle visual
                 const previousNodeId = this.currentNodeId;
                 this.currentNodeId = nextHop;
 
 
                 this.animatePacketMovement(() => {
-                    // This callback is executed when packet visually arrives
                     if (this.activeDataPacket) this.activeDataPacket.isMoving = false;
 
                     if (this.currentNodeId === this.endNodeId) {
@@ -203,33 +188,31 @@ export class RoutingController {
                         this._isPlaying = false;
                         this.visualizer.render(
                           this.pathTaken,
-                          this.currentNodeId ?? undefined, // Convert null to undefined
-                          this.endNodeId ?? undefined,     // Convert null to undefined
+                          this.currentNodeId ?? undefined,
+                          this.endNodeId ?? undefined,
                           this.activeDataPacket
                         );
-                    } else if (this._isPlaying) { // If still in "play" mode, continue to next step
+                    } else if (this._isPlaying)
                         this.performStep();
-                    } else { // Paused after step
+                    else {
                         this.isPaused = true;
                         this.updateStatusCallback(`Paused at ${this.currentNodeId}. Press Play to continue.`);
                         this.visualizer.render(
                           this.pathTaken,
-                          this.currentNodeId ?? undefined, // Convert null to undefined
-                          this.endNodeId ?? undefined,     // Convert null to undefined
+                          this.currentNodeId ?? undefined,
+                          this.endNodeId ?? undefined,
                           this.activeDataPacket
                         );
                     }
                 });
-
-
             }
         } else {
             this.updateStatusCallback(`No route found from ${this.currentNodeId} via Bloom Filters. Stuck.`);
             this.isPaused = true; this._isPlaying = false;
             this.visualizer.render(
               this.pathTaken,
-              this.currentNodeId ?? undefined, // Convert null to undefined
-              this.endNodeId ?? undefined,     // Convert null to undefined
+              this.currentNodeId ?? undefined,
+              this.endNodeId ?? undefined,
               this.activeDataPacket
             );
         }
@@ -237,33 +220,31 @@ export class RoutingController {
 
     private animatePacketMovement(onArrival: () => void): void {
         if (!this.activeDataPacket || !this.activeDataPacket.isMoving) {
-            onArrival(); // Should not happen if logic is correct
+            onArrival();
             return;
         }
 
-        const animationSpeed = 0.05; // Adjust for speed
+        const animationSpeed = 0.05;
         this.activeDataPacket.progress += animationSpeed;
 
         this.visualizer.render(
           this.pathTaken,
-          this.currentNodeId ?? undefined, // Convert null to undefined
-          this.endNodeId ?? undefined,     // Convert null to undefined
+          this.currentNodeId ?? undefined,
+          this.endNodeId ?? undefined,
           this.activeDataPacket
         );
 
         if (this.activeDataPacket.progress < 1) {
-            if (this._isPlaying || this.activeDataPacket.isMoving ) { // continue if playing or if just finishing current move while pausing
+            if (this._isPlaying || this.activeDataPacket.isMoving )
                  this.animationFrameId = requestAnimationFrame(() => this.animatePacketMovement(onArrival));
-            }
         } else {
-            this.activeDataPacket.progress = 1; // Snap to end
-            this.activeDataPacket.isMoving = false; // Stop logical movement marker
-            // Update current position to be the target for next step
+            this.activeDataPacket.progress = 1;
+            this.activeDataPacket.isMoving = false;
             this.activeDataPacket.currentPosition = { ...this.activeDataPacket.targetPosition };
             this.visualizer.render(
               this.pathTaken,
-              this.currentNodeId ?? undefined, // Convert null to undefined
-              this.endNodeId ?? undefined,     // Convert null to undefined
+              this.currentNodeId ?? undefined,
+              this.endNodeId ?? undefined,
               this.activeDataPacket
             );
 
@@ -286,6 +267,6 @@ export class RoutingController {
         this.updateStatusCallback("Idle. Initialize a new route.");
         this.updatePathTakenCallback("");
         this.updateTryingNeighborCallback("N/A", "N/A");
-        this.visualizer.render(); // Clear canvas
+        this.visualizer.render();
     }
 }

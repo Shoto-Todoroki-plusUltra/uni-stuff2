@@ -1,0 +1,14 @@
+{
+  "name": "bloom-filter-p2p-routing",
+  "version": "1.0.0",
+  "description": "P2P Routing Visualization with Bloom Filters",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "type": "module"
+}

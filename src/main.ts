@@ -3,7 +3,6 @@ import { P2PNode } from './node.js';
 import { Visualizer } from './visualizer.js';
 import { RoutingController } from './routingController.js';
 
-// DOM Elements
 const startNodeInput = document.getElementById('startNode') as HTMLInputElement;
 const endNodeInput = document.getElementById('endNode') as HTMLInputElement;
 const initRouteButton = document.getElementById('initRouteButton') as HTMLButtonElement;
@@ -16,10 +15,9 @@ const tryingNeighborSpan = document.getElementById('tryingNeighbor') as HTMLSpan
 const filterTierSpan = document.getElementById('filterTier') as HTMLSpanElement;
 
 
-// Setup
-const MAX_HOPS_BF = 3; // Max k for BF_Hk
-const BF_SIZE = 60;   // Bloom filter size (tune based on expected items)
-const BF_HASHES = 2;  // Number of hash functions
+const MAX_HOPS_BF = 3;
+const BF_SIZE = 60;
+const BF_HASHES = 2;
 
 const network = new Network(MAX_HOPS_BF, BF_SIZE, BF_HASHES);
 const visualizer = new Visualizer('networkCanvas', network);
@@ -34,9 +32,8 @@ const updateTrying = (n: string, t: string) => {
 const routingController = new RoutingController(network, visualizer, updateStatus, updatePath, updateTrying);
 
 function setupDefaultNetwork() {
-    network.nodes.clear(); // Clear existing nodes if any for reset
-
-    // Define Nodes with positions
+    network.nodes.clear();
+    
     const nodesData = [
         { id: 'A', x: 100, y: 100 }, { id: 'B', x: 250, y: 100 },
         { id: 'C', x: 100, y: 250 }, { id: 'D', x: 250, y: 250 },
@@ -45,7 +42,6 @@ function setupDefaultNetwork() {
     ];
     nodesData.forEach(nd => network.addNode(new P2PNode(nd.id, { x: nd.x, y: nd.y })));
 
-    // Define Connections
     network.connectNodes('A', 'B'); network.connectNodes('A', 'C');
     network.connectNodes('B', 'D'); network.connectNodes('B', 'E');
     network.connectNodes('C', 'D'); network.connectNodes('C', 'H');
@@ -54,16 +50,13 @@ function setupDefaultNetwork() {
     network.connectNodes('G', 'F'); network.connectNodes('H', 'G');
 
 
-    // Initialize Bloom Filters for the entire network
     network.initializeAllBloomFilters();
-    routingController.reset(); // Also resets controller state
+    routingController.reset();
     visualizer.render();
     playPauseButton.disabled = true;
     updateStatus("Network Ready. Enter Start/End nodes and Initialize Route.");
 }
 
-
-// Event Listeners
 initRouteButton.addEventListener('click', () => {
     const startId = startNodeInput.value.toUpperCase();
     const endId = endNodeInput.value.toUpperCase();
@@ -81,11 +74,8 @@ playPauseButton.addEventListener('click', () => {
 });
 
 resetButton.addEventListener('click', () => {
-    setupDefaultNetwork(); // Re-create and re-initialize network
-    // routingController.reset(); // Already called in setupDefaultNetwork
+    setupDefaultNetwork();
     playPauseButton.textContent = 'Play';
-    // playPauseButton.disabled = true; // Will be enabled by successful init
 });
 
-// Initial Setup
 setupDefaultNetwork();

@@ -3,7 +3,7 @@ import { CountingBloomFilter } from './bloomFilter.js';
 
 export class Network {
     public nodes: Map<NodeId, P2PNode>;
-    public maxHopsForBF: number; // Max k for BF_Hk
+    public maxHopsForBF: number;
     private bloomFilterSize: number;
     private bloomFilterNumHashes: number;
 
@@ -27,17 +27,13 @@ export class Network {
         }
     }
 
-    // This is a crucial step: building all filters.
     initializeAllBloomFilters(): void {
-        // 1. Each node initializes its BF_H1 (nodes 1 hop away)
         this.nodes.forEach(node => {
             node.initializeOwnBF_H1(this.bloomFilterSize, this.bloomFilterNumHashes);
         });
 
-        // 2. Iteratively build BF_Hk for k > 1
-        // BF_A_Hk = Union ( BF_N_H(k-1) ) for all neighbors N of A
         for (let k = 2; k <= this.maxHopsForBF; k++) {
-            this.nodes.forEach(currentNode => { // For each node 'A' (currentNode)
+            this.nodes.forEach(currentNode => {
                 let combinedBfForTierK = new CountingBloomFilter(this.bloomFilterSize, this.bloomFilterNumHashes);
                 currentNode.neighbors.forEach(neighborId => {
                     const neighborNode = this.nodes.get(neighborId);
@@ -48,20 +44,14 @@ export class Network {
                         }
                     }
                 });
-                // Remove direct neighbors and self from higher tier filters to keep tiers distinct in purpose
-                // (Though mathematically, the routing logic of checking tiers handles this implicitly)
-                // For this prototype, we'll keep it simple; the routing logic prioritizes lower explicit tiers.
                 currentNode.ownHopLimitedBloomFilters[k] = combinedBfForTierK;
             });
         }
-
-        // 3. Distribute/Cache Filters: Each node gets copies of its neighbors' fully formed filters
         this.nodes.forEach(node => {
             node.neighbors.forEach(neighborId => {
                 const neighborNode = this.nodes.get(neighborId);
-                if (neighborNode) {
+                if (neighborNode)
                     node.cacheNeighborFilters(neighborId, neighborNode.ownHopLimitedBloomFilters);
-                }
             });
         });
         console.log("Bloom filters initialized and distributed.");
@@ -76,7 +66,6 @@ export class Network {
             node.ownHopLimitedBloomFilters = {};
             node.neighborBloomFiltersCache.clear();
         });
-        // Re-initialize after reset. You might want to clear neighbors too if topology changes.
         this.initializeAllBloomFilters();
     }
 }

@@ -1,6 +1,6 @@
-import { CountingBloomFilter } from './bloomFilter.js';
 export class Network {
     constructor(maxHopsForBF = 3, bfSize = 50, bfNumHashes = 2) {
+        this.STALE_THRESHOLD_MS = 60000; // Example: 1 minute for a hint to be stale
         this.nodes = new Map();
         this.maxHopsForBF = maxHopsForBF;
         this.bloomFilterSize = bfSize;
@@ -17,52 +17,86 @@ export class Network {
             node2.addNeighbor(nodeId1);
         }
     }
-    // This is a crucial step: building all filters.
-    initializeAllBloomFilters() {
-        // 1. Each node initializes its BF_H1 (nodes 1 hop away)
+    // This is the core logic for building the hop-limited info with path hints
+    initializeNetworkInfo() {
+        const now = Date.now();
+        // Initialize all hop tiers for all nodes first
         this.nodes.forEach(node => {
-            node.initializeOwnBF_H1(this.bloomFilterSize, this.bloomFilterNumHashes);
+            for (let k = 1; k <= this.maxHopsForBF; k++) {
+                node.initializeHopTier(k, this.bloomFilterSize, this.bloomFilterNumHashes);
+            }
         });
-        // 2. Iteratively build BF_Hk for k > 1
-        // BF_A_Hk = Union ( BF_N_H(k-1) ) for all neighbors N of A
+        // 1. Each node initializes its H=1 info (direct neighbors are 1 hop away)
+        this.nodes.forEach(node => {
+            node.neighbors.forEach(neighborId => {
+                // For destination 'neighborId', the nextHop is 'neighborId' itself (direct connection)
+                node.addPathHint(1, neighborId, neighborId, now);
+            });
+        });
+        // 2. Iteratively build H=k info from H=(k-1) info of neighbors
+        // For node A, if neighbor N has destination D in N.ownHopLimitedInfo[k-1].pathHints,
+        // then D is k hops away from A, via N.
         for (let k = 2; k <= this.maxHopsForBF; k++) {
-            this.nodes.forEach(currentNode => {
-                let combinedBfForTierK = new CountingBloomFilter(this.bloomFilterSize, this.bloomFilterNumHashes);
-                currentNode.neighbors.forEach(neighborId => {
-                    const neighborNode = this.nodes.get(neighborId);
-                    if (neighborNode) {
-                        const neighborsBfForTierK_minus_1 = neighborNode.ownHopLimitedBloomFilters[k - 1];
-                        if (neighborsBfForTierK_minus_1) {
-                            combinedBfForTierK = combinedBfForTierK.union(neighborsBfForTierK_minus_1);
+            this.nodes.forEach(currentNodeA => {
+                currentNodeA.neighbors.forEach(neighborIdN => {
+                    const neighborNodeN = this.nodes.get(neighborIdN);
+                    if (neighborNodeN) {
+                        const neighborsInfoForTierK_minus_1 = neighborNodeN.ownHopLimitedInfo[k - 1];
+                        if (neighborsInfoForTierK_minus_1) {
+                            neighborsInfoForTierK_minus_1.pathHints.forEach((hintEntry, destinationD) => {
+                                // If destination D is not A itself, and not already a direct neighbor of A
+                                // (to avoid trivial loops or redundant H=1 style paths in higher tiers for those neighbors)
+                                if (destinationD !== currentNodeA.id && !currentNodeA.neighbors.has(destinationD)) {
+                                    // Check if we already have a hint for D at tier k.
+                                    // If not, or if this new path is somehow "better" (e.g. fresher, though not modeled here), add/update.
+                                    // For simplicity, first one found or overwrite.
+                                    // A more complex logic could handle multiple paths.
+                                    const existingHintForD_atTierK = currentNodeA.ownHopLimitedInfo[k]?.pathHints.get(destinationD);
+                                    if (!existingHintForD_atTierK || hintEntry.lastUpdated > existingHintForD_atTierK.lastUpdated) {
+                                        currentNodeA.addPathHint(k, destinationD, neighborIdN, now); // N is the next hop from A to reach D
+                                    }
+                                }
+                            });
                         }
                     }
                 });
-                // Remove direct neighbors and self from higher tier filters to keep tiers distinct in purpose
-                // (Though mathematically, the routing logic of checking tiers handles this implicitly)
-                // For this prototype, we'll keep it simple; the routing logic prioritizes lower explicit tiers.
-                currentNode.ownHopLimitedBloomFilters[k] = combinedBfForTierK;
             });
         }
-        // 3. Distribute/Cache Filters: Each node gets copies of its neighbors' fully formed filters
+        // 3. Distribute/Cache Full Info: Each node gets copies of its neighbors' fully formed *ownHopLimitedInfo*
+        // This step is for if a node needs to inspect a neighbor's detailed view,
+        // but routing decisions will now primarily use the node's *own* precomputed `ownHopLimitedInfo`.
+        // For the current routing logic, this direct caching might be less critical if `initializeNetworkInfo`
+        // is called globally. However, for dynamic updates, nodes would exchange their `ownHopLimitedInfo`.
         this.nodes.forEach(node => {
             node.neighbors.forEach(neighborId => {
                 const neighborNode = this.nodes.get(neighborId);
                 if (neighborNode) {
-                    node.cacheNeighborFilters(neighborId, neighborNode.ownHopLimitedBloomFilters);
+                    node.cacheNeighborInfo(neighborId, neighborNode.ownHopLimitedInfo);
                 }
             });
         });
-        console.log("Bloom filters initialized and distributed.");
+        console.log("Network info (filters and path hints) initialized.");
     }
     getNode(id) {
         return this.nodes.get(id);
     }
+    pruneAllNodes(staleThresholdMs) {
+        this.nodes.forEach(node => {
+            node.pruneStaleEntriesAndRebuildFilters(staleThresholdMs, this.bloomFilterSize, this.bloomFilterNumHashes);
+        });
+        console.log("Pruned stale entries for all nodes.");
+        // After pruning, it might be beneficial to re-run parts of initializeNetworkInfo
+        // to let nodes rebuild higher-tier hints from potentially pruned lower-tier hints of neighbors.
+        // For a prototype, a full re-initialization might be simpler after pruning.
+        this.initializeNetworkInfo(); // Rebuild with fresh timestamps
+    }
     resetNetwork() {
         this.nodes.forEach(node => {
-            node.ownHopLimitedBloomFilters = {};
-            node.neighborBloomFiltersCache.clear();
+            for (let k = 1; k <= this.maxHopsForBF; k++) {
+                node.initializeHopTier(k, this.bloomFilterSize, this.bloomFilterNumHashes);
+            }
+            node.neighborInfoCache.clear();
         });
-        // Re-initialize after reset. You might want to clear neighbors too if topology changes.
-        this.initializeAllBloomFilters();
+        this.initializeNetworkInfo();
     }
 }

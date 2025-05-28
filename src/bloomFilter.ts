@@ -1,7 +1,9 @@
+// A very simplified Counting Bloom Filter for prototype purposes
+// In a real scenario, use a robust library or a more detailed implementation.
 export class CountingBloomFilter {
     public size: number;
-    private numHashes: number;
-    public bitArray: number[];
+    public numHashes: number;
+    public bitArray: number[]; // Using number array for simplicity, Uint8Array or similar for efficiency
 
     constructor(size: number = 100, numHashes: number = 3) {
         this.size = size;
@@ -9,6 +11,7 @@ export class CountingBloomFilter {
         this.bitArray = new Array(size).fill(0);
     }
 
+    // Simple string hashing (djb2)
     private hash(str: string, seed: number): number {
         let h = seed;
         for (let i = 0; i < str.length; i++) {
@@ -48,8 +51,9 @@ export class CountingBloomFilter {
 
     union(otherFilter: CountingBloomFilter): CountingBloomFilter {
         if (this.size !== otherFilter.size || this.numHashes !== otherFilter.numHashes) {
+            // For simplicity in prototype, assume compatible. Real world needs error handling or resizing.
             console.warn("Attempting to union Bloom filters of different configurations.");
-            return this;
+            return this; // Or throw error
         }
         const newFilter = new CountingBloomFilter(this.size, this.numHashes);
         for (let i = 0; i < this.size; i++) {
@@ -58,6 +62,7 @@ export class CountingBloomFilter {
         return newFilter;
     }
 
+    // For visualization/debug
     serialize(): number[] {
         return [...this.bitArray];
     }

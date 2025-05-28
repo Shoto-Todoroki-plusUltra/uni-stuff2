@@ -5,7 +5,7 @@ export interface DataPacket {
     currentPosition: NodePosition;
     targetPosition: NodePosition;
     isMoving: boolean;
-    progress: number;
+    progress: number; // 0 to 1
     color: string;
 }
 
@@ -48,6 +48,7 @@ export class Visualizer {
 
     private drawDataPacket(packet: DataPacket | null): void {
         if (!packet || !packet.isMoving) return;
+
         const currentX = packet.currentPosition.x + (packet.targetPosition.x - packet.currentPosition.x) * packet.progress;
         const currentY = packet.currentPosition.y + (packet.targetPosition.y - packet.currentPosition.y) * packet.progress;
 
@@ -68,16 +69,19 @@ export class Visualizer {
     ): void {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
+        // Draw edges first
         this.network.nodes.forEach(node => {
             node.neighbors.forEach(neighborId => {
                 const neighborNode = this.network.getNode(neighborId);
-                if (neighborNode && node.id < neighborId) {
-                    const isPathEdge = pathTaken.includes(node.id) && pathTaken.includes(neighborId) && Math.abs(pathTaken.indexOf(node.id) - pathTaken.indexOf(neighborId)) === 1;
+                if (neighborNode && node.id < neighborId) { // Draw each edge once
+                    const isPathEdge = pathTaken.includes(node.id) && pathTaken.includes(neighborId) &&
+                                       Math.abs(pathTaken.indexOf(node.id) - pathTaken.indexOf(neighborId)) === 1;
                     this.drawEdge(node, neighborNode, isPathEdge ? 'orange' : 'lightgrey');
                 }
             });
         });
 
+        // Draw nodes
         this.network.nodes.forEach(node => {
             let color = 'lightblue';
             if (node.id === currentNodeId) color = 'lightgreen';
@@ -86,6 +90,9 @@ export class Visualizer {
             this.drawNode(node, color);
         });
 
-        if (packet) this.drawDataPacket(packet);
+        // Draw packet
+        if (packet) {
+            this.drawDataPacket(packet);
+        }
     }
 }

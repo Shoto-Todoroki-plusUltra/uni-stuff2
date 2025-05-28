@@ -1,5 +1,5 @@
 import { Network } from './network.js';
-import { P2PNode, NodeId, NodePosition } from './node.js';
+import { P2PNode, NodeId, NodePosition } from './node.js'; // PathHintEntry not directly used here
 import { Visualizer, DataPacket } from './visualizer.js';
 
 export class RoutingController {
@@ -17,7 +17,8 @@ export class RoutingController {
 
     private updateStatusCallback: (status: string) => void;
     private updatePathTakenCallback: (path: string) => void;
-    private updateTryingNeighborCallback: (neighbor: string, tier: string) => void;
+    private updateTryingNeighborCallback: (neighbor: string, tier: string) // Tier now means k-hop distance
+        => void;
 
 
     constructor(
@@ -47,7 +48,7 @@ export class RoutingController {
             return false;
         }
 
-        this.reset();
+        this.reset(); // Full reset before new route
         this.startNodeId = startId;
         this.endNodeId = endId;
         this.currentNodeId = startId;
@@ -65,10 +66,10 @@ export class RoutingController {
         this.updateStatusCallback(`Route initialized: ${startId} to ${endId}. Press Play.`);
         this.updatePathTakenCallback(this.pathTaken.join(' -> '));
         this.visualizer.render(
-          this.pathTaken,
-          this.currentNodeId ?? undefined, 
-          this.endNodeId ?? undefined, 
-          this.activeDataPacket
+            this.pathTaken,
+            this.currentNodeId ?? undefined,
+            this.endNodeId ?? undefined,
+            this.activeDataPacket
         );
         return true;
     }
@@ -79,7 +80,7 @@ export class RoutingController {
             return;
         }
 
-        if (this.currentNodeId === this.endNodeId) {
+        if (this.currentNodeId === this.endNodeId && this.activeDataPacket && !this.activeDataPacket.isMoving) {
             this.updateStatusCallback(`Destination ${this.endNodeId} already reached. Reset to start a new route.`);
             this._isPlaying = false;
             this.isPaused = true;
@@ -91,40 +92,66 @@ export class RoutingController {
 
         if (this._isPlaying) {
             this.updateStatusCallback("Routing...");
-            this.performStep();
-        } else {
+            if (this.activeDataPacket && !this.activeDataPacket.isMoving) {
+                // If we were paused and the packet was not moving, start a new step
+                this.performStep();
+            } else if (this.activeDataPacket && this.activeDataPacket.isMoving) {
+                // If paused mid-animation, just resume animation
+                 this.animatePacketMovement(() => this.stepPostAnimation());
+            }
+        } else { // Pausing
             this.updateStatusCallback("Paused.");
+            // Animation will naturally stop if _isPlaying is false in its loop condition
+            // Or if we want immediate stop:
             if (this.animationFrameId) {
                 cancelAnimationFrame(this.animationFrameId);
                 this.animationFrameId = null;
             }
-            if (this.activeDataPacket) this.activeDataPacket.isMoving = false;
+            // Visual update to show paused state even if mid-transit (packet might appear static)
             this.visualizer.render(
-              this.pathTaken,
-              this.currentNodeId ?? undefined,
-              this.endNodeId ?? undefined,
-              this.activeDataPacket
+                this.pathTaken,
+                this.currentNodeId ?? undefined,
+                this.endNodeId ?? undefined,
+                this.activeDataPacket
             );
         }
     }
 
+    private stepPostAnimation() {
+        // This function is called after a packet visually arrives at an intermediate node
+        if (this.activeDataPacket) this.activeDataPacket.isMoving = false;
 
-    private async performStep(): Promise<void> {
-        if (!this.currentNodeId || !this.endNodeId || !this.startNodeId ) {
-            this.isPaused = true; this._isPlaying = false; return;
-        }
         if (this.currentNodeId === this.endNodeId) {
             this.updateStatusCallback(`Destination ${this.endNodeId} reached!`);
-            this.updatePathTakenCallback(this.pathTaken.join(' -> '));
-            this.isPaused = true; this._isPlaying = false;
-            if (this.activeDataPacket) this.activeDataPacket.isMoving = false;
-            this.visualizer.render(
-              this.pathTaken,
-              this.currentNodeId ?? undefined,
-              this.endNodeId ?? undefined,
-              this.activeDataPacket
-            );
-            return;
+            this.isPaused = true;
+            this._isPlaying = false;
+        } else if (this._isPlaying) {
+            this.performStep(); // If still in "play" mode, continue to next logical step
+        } else { // Paused after step
+            this.isPaused = true;
+            this.updateStatusCallback(`Paused at ${this.currentNodeId}. Press Play to continue.`);
+        }
+        this.visualizer.render(
+            this.pathTaken,
+            this.currentNodeId ?? undefined,
+            this.endNodeId ?? undefined,
+            this.activeDataPacket
+        );
+    }
+
+
+    private async performStep(): Promise<void> {
+        if (!this.currentNodeId || !this.endNodeId || !this.startNodeId || !this._isPlaying) {
+             if (!this._isPlaying && this.currentNodeId !== this.endNodeId) {
+                 // Do nothing if paused and not at destination
+             } else if (!this.currentNodeId || !this.endNodeId || !this.startNodeId) {
+                this.isPaused = true; this._isPlaying = false; return;
+             }
+        }
+
+        if (!this.currentNodeId) { // Add this check
+         this.updateStatusCallback("Error: Current node ID is null, cannot proceed.");
+         this.isPaused = true; this._isPlaying = false; return;
         }
 
         const currentNode = this.network.getNode(this.currentNodeId);
@@ -134,34 +161,38 @@ export class RoutingController {
         }
 
         let nextHop: NodeId | null = null;
-        let chosenTier = -1;
+        let chosenHopTier = -1; // k-hop distance from current node
 
-        if (currentNode.neighbors.has(this.endNodeId)) {
-            nextHop = this.endNodeId;
-            chosenTier = 0;
-            this.updateTryingNeighborCallback(this.endNodeId, "Direct (H0)");
-        } else {
-            let bestK = Infinity;
-            const sortedNeighbors = Array.from(currentNode.neighbors).sort();
-
-            for (const neighborId of sortedNeighbors) {
-                const neighborCachedFilters = currentNode.neighborBloomFiltersCache.get(neighborId);
-                if (!neighborCachedFilters) continue;
-
-                for (let k_tier = 1; k_tier <= this.network.maxHopsForBF; k_tier++) {
-                    if (k_tier < bestK) {
-                        const neighborsBfForTierK = neighborCachedFilters[k_tier];
-                        if (neighborsBfForTierK && neighborsBfForTierK.has(this.endNodeId)) {
-                            bestK = k_tier;
-                            nextHop = neighborId;
-                            chosenTier = k_tier;
-                            this.updateTryingNeighborCallback(neighborId, `H${k_tier}`);
-                        }
-                    } else
-                        break;
+        // New routing logic using ownHopLimitedInfo with path hints
+        for (let k = 1; k <= this.network.maxHopsForBF; k++) {
+            const tierInfo = currentNode.ownHopLimitedInfo[k];
+            if (tierInfo) {
+                if (!this.endNodeId) { // Add this check
+                  // Should not happen if route is initialized, but good for type safety
+                  this.updateStatusCallback("Error: End node ID is null.");
+                  this.isPaused = true; this._isPlaying = false; return;
                 }
+                // Check the Bloom filter first for probabilistic presence (optional optimization)
+                // if (tierInfo.filter.has(this.endNodeId)) {
+                    const hintEntry = tierInfo.pathHints.get(this.endNodeId);
+                    if (hintEntry) {
+                        // Check for time decay
+                        if ((Date.now() - hintEntry.lastUpdated) > this.network.STALE_THRESHOLD_MS) {
+                            this.updateStatusCallback(`Hint for ${this.endNodeId} via ${hintEntry.nextHop} from tier H${k} is stale. Ignoring.`);
+                            // Optionally, trigger pruning for this specific hint here or mark for later pruning
+                            // For now, we just ignore it for this step.
+                            continue; // Check next tier or rely on global pruning.
+                        }
+
+                        nextHop = hintEntry.nextHop;
+                        chosenHopTier = k;
+                        this.updateTryingNeighborCallback(nextHop, `H${k} (Path Hint)`);
+                        break; // Found a path hint in the lowest possible k-tier
+                    }
+                // }
             }
         }
+
 
         if (nextHop) {
             const nextNodeObj = this.network.getNode(nextHop);
@@ -173,86 +204,71 @@ export class RoutingController {
 
                 this.pathTaken.push(nextHop);
                 this.updatePathTakenCallback(this.pathTaken.join(' -> '));
-                this.updateStatusCallback(`Moving data from ${this.currentNodeId} to ${nextHop}...`);
+                this.updateStatusCallback(`Routing to ${nextHop} (destination is ${chosenHopTier} hops away)...`);
 
-                const previousNodeId = this.currentNodeId;
-                this.currentNodeId = nextHop;
+                const previousNodeId = this.currentNodeId; // for rendering path highlight during animation
+                this.currentNodeId = nextHop; // Logically move to next hop
 
+                this.animatePacketMovement(() => this.stepPostAnimation());
 
-                this.animatePacketMovement(() => {
-                    if (this.activeDataPacket) this.activeDataPacket.isMoving = false;
-
-                    if (this.currentNodeId === this.endNodeId) {
-                        this.updateStatusCallback(`Destination ${this.endNodeId} reached!`);
-                        this.isPaused = true;
-                        this._isPlaying = false;
-                        this.visualizer.render(
-                          this.pathTaken,
-                          this.currentNodeId ?? undefined,
-                          this.endNodeId ?? undefined,
-                          this.activeDataPacket
-                        );
-                    } else if (this._isPlaying)
-                        this.performStep();
-                    else {
-                        this.isPaused = true;
-                        this.updateStatusCallback(`Paused at ${this.currentNodeId}. Press Play to continue.`);
-                        this.visualizer.render(
-                          this.pathTaken,
-                          this.currentNodeId ?? undefined,
-                          this.endNodeId ?? undefined,
-                          this.activeDataPacket
-                        );
-                    }
-                });
+            } else {
+                 this.updateStatusCallback(`Error: Next hop node ${nextHop} not found!`);
+                 this.isPaused = true; this._isPlaying = false;
             }
         } else {
-            this.updateStatusCallback(`No route found from ${this.currentNodeId} via Bloom Filters. Stuck.`);
+            this.updateStatusCallback(`No fresh path hint found from ${this.currentNodeId} to ${this.endNodeId}. Routing stuck.`);
             this.isPaused = true; this._isPlaying = false;
             this.visualizer.render(
-              this.pathTaken,
-              this.currentNodeId ?? undefined,
-              this.endNodeId ?? undefined,
-              this.activeDataPacket
+                this.pathTaken,
+                this.currentNodeId ?? undefined,
+                this.endNodeId ?? undefined,
+                this.activeDataPacket
             );
         }
     }
 
     private animatePacketMovement(onArrival: () => void): void {
         if (!this.activeDataPacket || !this.activeDataPacket.isMoving) {
-            onArrival();
+            // if somehow called when not supposed to be moving, or if paused externally
+            if (this.activeDataPacket && this.activeDataPacket.progress >= 1) { // Already arrived
+                 onArrival();
+            }
             return;
         }
 
         const animationSpeed = 0.05;
         this.activeDataPacket.progress += animationSpeed;
 
+        // Determine node to highlight as "current" during animation (the one packet is leaving)
+        const RENDER_PREVIOUS_NODE_AS_CURRENT = this.pathTaken[this.pathTaken.length - 2] || this.startNodeId;
+
         this.visualizer.render(
-          this.pathTaken,
-          this.currentNodeId ?? undefined,
-          this.endNodeId ?? undefined,
-          this.activeDataPacket
+            this.pathTaken,
+            (this.activeDataPacket.progress < 1 ? RENDER_PREVIOUS_NODE_AS_CURRENT : this.currentNodeId) ?? undefined,
+            this.endNodeId ?? undefined,
+            this.activeDataPacket
         );
 
         if (this.activeDataPacket.progress < 1) {
-            if (this._isPlaying || this.activeDataPacket.isMoving )
-                 this.animationFrameId = requestAnimationFrame(() => this.animatePacketMovement(onArrival));
+            if (this._isPlaying || this.isPaused && this.activeDataPacket.isMoving) { // Continue animation if playing, or if paused but mid-transit
+                this.animationFrameId = requestAnimationFrame(() => this.animatePacketMovement(onArrival));
+            }
         } else {
             this.activeDataPacket.progress = 1;
-            this.activeDataPacket.isMoving = false;
+            // this.activeDataPacket.isMoving = false; // This will be set in stepPostAnimation
             this.activeDataPacket.currentPosition = { ...this.activeDataPacket.targetPosition };
-            this.visualizer.render(
-              this.pathTaken,
-              this.currentNodeId ?? undefined,
-              this.endNodeId ?? undefined,
-              this.activeDataPacket
-            );
-
+             // Final render at exact arrival spot, current node is now the actual current node
+            this.visualizer.render(this.pathTaken, this.currentNodeId ?? undefined, this.endNodeId ?? undefined, this.activeDataPacket);
             onArrival();
         }
     }
 
     reset(): void {
+        // Stop any ongoing animation
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
         this.startNodeId = null;
         this.endNodeId = null;
         this.currentNodeId = null;
@@ -260,13 +276,10 @@ export class RoutingController {
         this.isPaused = true;
         this._isPlaying = false;
         this.activeDataPacket = null;
-        if (this.animationFrameId) {
-            cancelAnimationFrame(this.animationFrameId);
-            this.animationFrameId = null;
-        }
+
         this.updateStatusCallback("Idle. Initialize a new route.");
         this.updatePathTakenCallback("");
         this.updateTryingNeighborCallback("N/A", "N/A");
-        this.visualizer.render();
+        this.visualizer.render(); // Clear canvas
     }
 }

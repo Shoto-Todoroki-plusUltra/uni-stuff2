@@ -3,11 +3,13 @@ import { P2PNode } from './node.js';
 import { Visualizer } from './visualizer.js';
 import { RoutingController } from './routingController.js';
 
+// DOM Elements
 const startNodeInput = document.getElementById('startNode') as HTMLInputElement;
 const endNodeInput = document.getElementById('endNode') as HTMLInputElement;
 const initRouteButton = document.getElementById('initRouteButton') as HTMLButtonElement;
 const playPauseButton = document.getElementById('playPauseButton') as HTMLButtonElement;
 const resetButton = document.getElementById('resetButton') as HTMLButtonElement;
+const pruneButton = document.getElementById('pruneButton') as HTMLButtonElement; // New button
 
 const currentActionSpan = document.getElementById('currentAction') as HTMLSpanElement;
 const pathTakenSpan = document.getElementById('pathTaken') as HTMLSpanElement;
@@ -15,11 +17,15 @@ const tryingNeighborSpan = document.getElementById('tryingNeighbor') as HTMLSpan
 const filterTierSpan = document.getElementById('filterTier') as HTMLSpanElement;
 
 
+// Setup
 const MAX_HOPS_BF = 3;
 const BF_SIZE = 60;
 const BF_HASHES = 2;
+const STALE_HINT_THRESHOLD_MS = 30000; // 30 seconds for a hint to become stale for demo
 
 const network = new Network(MAX_HOPS_BF, BF_SIZE, BF_HASHES);
+network.STALE_THRESHOLD_MS = STALE_HINT_THRESHOLD_MS; // Set it on the network instance
+
 const visualizer = new Visualizer('networkCanvas', network);
 
 const updateStatus = (s: string) => { currentActionSpan.textContent = s; };
@@ -33,7 +39,7 @@ const routingController = new RoutingController(network, visualizer, updateStatu
 
 function setupDefaultNetwork() {
     network.nodes.clear();
-    
+
     const nodesData = [
         { id: 'A', x: 100, y: 100 }, { id: 'B', x: 250, y: 100 },
         { id: 'C', x: 100, y: 250 }, { id: 'D', x: 250, y: 250 },
@@ -49,14 +55,15 @@ function setupDefaultNetwork() {
     network.connectNodes('E', 'F');
     network.connectNodes('G', 'F'); network.connectNodes('H', 'G');
 
-
-    network.initializeAllBloomFilters();
+    network.initializeNetworkInfo(); // Changed method name
     routingController.reset();
     visualizer.render();
     playPauseButton.disabled = true;
     updateStatus("Network Ready. Enter Start/End nodes and Initialize Route.");
 }
 
+
+// Event Listeners
 initRouteButton.addEventListener('click', () => {
     const startId = startNodeInput.value.toUpperCase();
     const endId = endNodeInput.value.toUpperCase();
@@ -78,4 +85,16 @@ resetButton.addEventListener('click', () => {
     playPauseButton.textContent = 'Play';
 });
 
+pruneButton.addEventListener('click', () => { // New event listener
+    updateStatus("Pruning stale hints and rebuilding network info...");
+    network.pruneAllNodes(network.STALE_THRESHOLD_MS); // Use threshold from network
+    // After pruning, current routes are invalid, so reset routing controller
+    routingController.reset();
+    visualizer.render(); // Re-render the network state
+    playPauseButton.disabled = true; // Require re-initialization of route
+    playPauseButton.textContent = 'Play';
+    updateStatus("Pruning complete. Network info rebuilt. Initialize a new route.");
+});
+
+// Initial Setup
 setupDefaultNetwork();

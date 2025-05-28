@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P Bloom Filter Routing</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Bloom Filter Routing with Path Hints & Decay</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>P2P Data Routing with Hop-Limited Bloom Filters</h1>
+    <h1>P2P Data Routing with Hop-Limited Path Hints & Time Decay</h1>
     <div class="controls">
         <label for="startNode">Start Node ID:</label>
         <input type="text" id="startNode" value="A">
@@ -16,11 +16,11 @@
         <button id="initRouteButton">Initialize & Route</button>
         <button id="playPauseButton" disabled>Play/Pause</button>
         <button id="resetButton">Reset Network</button>
-    </div>
+        <button id="pruneButton">Prune Stale Hints</button> </div>
     <div id="infoPanel">
         Current Action: <span id="currentAction">Idle</span><br>
         Path Taken: <span id="pathTaken"></span><br>
-        Trying via Neighbor: <span id="tryingNeighbor"></span> (Filter Tier: <span id="filterTier"></span>)
+        Trying via Neighbor (Next Hop): <span id="tryingNeighbor"></span> (Path to Dest is <span id="filterTier"></span> away)
     </div>
     <canvas id="networkCanvas"></canvas>
     <script type="module" src="dist/main.js"></script> </body>
